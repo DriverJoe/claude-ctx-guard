@@ -22,7 +22,13 @@
 #  7. Fails OPEN on any error/missing dependency — never bricks a session.
 #  8. PreCompact keeps its reminder role; blocks auto-compact at most ONCE per arm-cycle.
 
-EVENT="${1:-}"
+# Accept BOTH Claude Code's canonical event names (Stop / UserPromptSubmit /
+# PreCompact — the arg install.sh wires) and the short lowercase forms (stop /
+# prompt / precompact — used by the tests and by hand-wired setups). Normalise
+# to lowercase (explicit A-Z ranges, not `tr A-Z a-z`, to dodge locale quirks)
+# and alias userpromptsubmit -> prompt, so the case statement below matches either.
+EVENT="$(printf '%s' "${1:-}" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
+[ "$EVENT" = "userpromptsubmit" ] && EVENT="prompt"
 
 STATE_DIR="${CTX_GUARD_STATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ctx-state}"
 ARM="${CTX_GUARD_ARM:-100000}"            # tokens used: guard arms above this
@@ -56,8 +62,12 @@ PROJ="${CLAUDE_PROJECT_DIR:-}"
 if [ -n "$CTX_GUARD_TARGET" ]; then
   TARGET="$CTX_GUARD_TARGET"                                   # explicit/test override
 elif [ -n "$PROJ" ] && [ -f "$PROJ/.claude/ctx-guard.target" ]; then
-  TARGET="$(grep -vE '^[[:space:]]*(#|$)' "$PROJ/.claude/ctx-guard.target" 2>/dev/null | head -n 1)"
+  # Trim surrounding whitespace: an indented or trailing-space path would make
+  # us stat a name nobody ever writes -> permanent-stale block until fail-open.
+  TARGET="$(grep -vE '^[[:space:]]*(#|$)' "$PROJ/.claude/ctx-guard.target" 2>/dev/null | head -n 1 \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
   [ -n "$TARGET" ] || TARGET="$PROJ/SESSION.md"                # empty override file -> default
+  case "$TARGET" in /*) ;; *) TARGET="$PROJ/$TARGET" ;; esac   # relative -> project-rooted, not cwd-dependent
 elif [ -n "$PROJ" ]; then
   TARGET="$PROJ/SESSION.md"                                    # default per-project log (root; .claude/ is a gated path)
 else

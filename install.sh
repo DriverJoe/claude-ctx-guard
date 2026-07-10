@@ -172,11 +172,17 @@ else
   CURRENT='{}'
 fi
 
+# Dedup by SUBSTRING ("/ctx-guard.sh"), not exact command equality: the guard
+# accepts several equivalent arg spellings (Stop vs stop, hand-wired setups,
+# older installs), and an exact match would append a second, double-firing
+# entry alongside any of them. Substring is also what uninstall.sh matches, so
+# install and uninstall agree on what counts as "our" wiring. Safe per-event:
+# each event array only ever holds that event's hooks.
 MERGE_JQ='
 def ensure(event; cmd):
   .hooks = (.hooks // {})
   | .hooks[event] = ((.hooks[event] // [])
-      | if any(.[]?; [.hooks[]?.command] | index(cmd) != null) then .
+      | if any(.[]?; any(.hooks[]?; (.command // "") | contains("/ctx-guard.sh"))) then .
         else . + [ {"hooks":[{"type":"command","command":cmd}]} ] end);
 ensure("Stop"; $stop)
 | ensure("UserPromptSubmit"; $ups)

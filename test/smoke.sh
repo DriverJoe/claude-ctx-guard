@@ -125,6 +125,52 @@ PROJ3="$WORK/proj3"; mkdir -p "$PROJ3/.claude"
 bridge p5 130000
 printf '%s' "{\"session_id\":\"p5\",\"cwd\":\"$PROJ3\",\"transcript_path\":\"/nonexistent\"}" | env -u CTX_GUARD_TARGET -u CLAUDE_PROJECT_DIR CTX_GUARD_NOW="$NOW" "$GUARD" stop | grep -q 'SESSION.md' && ok "resolved via stdin cwd" || bad "stdin cwd not used"
 
+# ---- REGRESSION: the guard MUST accept the canonical Claude Code event names.
+# install.sh wires the argv as `Stop` / `UserPromptSubmit` / `PreCompact` (the
+# capitalized names Claude Code uses as its hook-event keys), NOT the short
+# lowercase forms the cases above use. An earlier build only matched lowercase,
+# so an *installed* guard fell through to `*) exit 0` and never blocked — inert.
+# These three assertions invoke with the EXACT strings install.sh writes.
+echo "18. canonical Claude Code event names (exactly what install.sh wires)"
+touch -t 202601010000 "$WORK/vault.md"
+bridge cc1 130000
+run Stop '{"session_id":"cc1","transcript_path":"/nonexistent"}' | grep -q '"decision":"block"' && ok "Stop blocks like stop" || bad "Stop must block (install.sh wires this name)"
+bridge cc2 120000
+o=$(run UserPromptSubmit '{"session_id":"cc2","transcript_path":"/nonexistent"}')
+{ printf '%s' "$o" | grep -q 'additionalContext' && ! printf '%s' "$o" | grep -q '"decision":"block"'; } && ok "UserPromptSubmit injects context like prompt" || bad "UserPromptSubmit must behave like prompt"
+bridge cc3 190000
+run PreCompact '{"session_id":"cc3","trigger":"auto","transcript_path":"/nonexistent"}' | grep -q '"decision":"block"' && ok "PreCompact(auto) blocks like precompact" || bad "PreCompact must block (install.sh wires this name)"
+
+# ---- REGRESSION: .target lines must be whitespace-trimmed and project-rooted.
+# An indented/trailing-space path used to be stat'd verbatim -> a name nobody
+# ever writes -> permanent-stale block until the escape hatch failed open.
+echo "19. .target line with surrounding whitespace + relative path"
+PROJ4="$WORK/proj4"; mkdir -p "$PROJ4/.claude"
+: > "$PROJ4/notes.md"   # fresh right now
+printf '   notes.md   \n' > "$PROJ4/.claude/ctx-guard.target"   # indented, trailing spaces, relative
+bridge p6 130000
+o=$(runp stop "$PROJ4" '{"session_id":"p6","transcript_path":"/nonexistent"}')
+[ -z "$o" ] && ok "trimmed + project-rooted target seen as fresh (allow)" || bad "whitespace/relative target mishandled: $o"
+touch -t 202601010000 "$PROJ4/notes.md"
+runp stop "$PROJ4" '{"session_id":"p6","transcript_path":"/nonexistent"}' | grep -q 'notes.md' && ok "stale same target blocks and names it" || bad "expected block naming notes.md"
+
+# ---- REGRESSION: install.sh must not double-wire over an EXISTING ctx-guard
+# entry with a different arg spelling (e.g. a hand-wired lowercase setup). The
+# old dedup was byte-exact on the full command, so it appended a second,
+# double-firing entry per event.
+echo "20. installer dedup: pre-existing lowercase wiring -> no second entry"
+INSTALL="$HERE/../install.sh"
+FAKE="$WORK/fake-config"; mkdir -p "$FAKE"
+cat > "$FAKE/settings.json" <<'EOF'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$HOME/.claude/hooks/ctx-guard.sh stop"}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$HOME/.claude/hooks/ctx-guard.sh prompt"}]}],"PreCompact":[{"hooks":[{"type":"command","command":"$HOME/.claude/hooks/ctx-guard.sh precompact"}]}]}}
+EOF
+CLAUDE_CONFIG_DIR="$FAKE" "$INSTALL" -y --no-statusline >/dev/null 2>&1
+n=$(jq '[.hooks.Stop, .hooks.UserPromptSubmit, .hooks.PreCompact | length] | add' "$FAKE/settings.json")
+[ "$n" = 3 ] && ok "still exactly one entry per event" || bad "double-wired: $n entries across the 3 events (want 3)"
+CLAUDE_CONFIG_DIR="$FAKE" "$INSTALL" -y --no-statusline >/dev/null 2>&1
+n2=$(jq '[.hooks.Stop, .hooks.UserPromptSubmit, .hooks.PreCompact | length] | add' "$FAKE/settings.json")
+[ "$n2" = 3 ] && ok "re-run is a true no-op" || bad "re-run changed wiring: $n2 entries"
+
 echo
 echo "===== $pass passed, $fail failed ====="
 [ "$fail" -eq 0 ]

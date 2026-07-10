@@ -137,7 +137,8 @@ Because every error path fails open, even a half-removed install degrades to "do
 
 ## How it was tested
 
-- **17 smoke cases (18 assertions)** covering the state machine: arm at ~100k, block on stale target across all three hook events, ACK on fresh write, re-arm at +40k, disarm below 80k, the 3-block escape hatch, target-resolution precedence (env > `.target` > default), the transcript-JSONL fallback, and fail-open on malformed stdin / unresolvable project.
+- **20 smoke cases (25 assertions)** covering the state machine: arm at ~100k, block on stale target across all three hook events, ACK on fresh write, re-arm at +40k, disarm below 80k, the 3-block escape hatch, target-resolution precedence (env > `.target` > default) including whitespace/relative-path handling in the `.target` file, the transcript-JSONL fallback, fail-open on malformed stdin / unresolvable project, the **canonical capitalized event names exactly as `install.sh` wires them** (`Stop` / `UserPromptSubmit` / `PreCompact`), and installer idempotency over pre-existing hand-wired entries.
+- **An adversarial contract audit** (multi-agent): six independent auditors each attacked one install↔runtime contract (bridge path, bridge schema, uninstall matcher, installer idempotency, target resolution, event-name wiring), with every claimed finding then adversarially re-verified against the actual shell semantics before being accepted.
 - **A live headless end-to-end** (`claude -p`) driving a real session past the arm threshold, confirming the block fires and clears against an actual flush.
 
 ---
